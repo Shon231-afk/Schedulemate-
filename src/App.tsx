@@ -1,0 +1,588 @@
+import React, { useState, useEffect } from 'react';
+import { motion, AnimatePresence } from 'motion/react';
+import { 
+  Calendar, 
+  Clock, 
+  BookOpen, 
+  Settings2, 
+  CheckCircle2, 
+  ChevronRight, 
+  Plus, 
+  Trash2, 
+  BrainCircuit,
+  Printer,
+  Download,
+  Users,
+  Search,
+  Hash,
+  MessageSquare,
+  MoreVertical
+} from 'lucide-react';
+import { DayOfWeek, Subject, ScheduleSettings, DaySchedule, Group } from './types';
+import { generateSchedule } from './logic/scheduler';
+
+const DAYS: DayOfWeek[] = ['Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница'];
+
+const DEFAULT_SUBJECTS: Subject[] = [
+  { id: '1', name: 'Математика', complexity: 'hard' },
+  { id: '2', name: 'Физика', complexity: 'hard' },
+  { id: '3', name: 'Программирование', complexity: 'medium' },
+  { id: '4', name: 'Английский', complexity: 'medium' },
+  { id: '5', name: 'История', complexity: 'easy' },
+];
+
+const DEFAULT_SETTINGS: ScheduleSettings = {
+  subjects: [],
+  classesPerDay: 4,
+  classDuration: 90,
+  days: DAYS,
+  shortBreak: 10,
+  longBreak: 30,
+  longBreakAfter: 2,
+  startTime: '08:30',
+};
+
+export default function App() {
+  const [groups, setGroups] = useState<Group[]>(() => {
+    const saved = localStorage.getItem('edu_sync_groups');
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch (e) {
+        console.error('Failed to parse saved groups', e);
+      }
+    }
+    return [
+      {
+        id: 'default-1',
+        name: 'ПО-31',
+        subjects: [
+          { id: 'po-1', name: 'Программирование', complexity: 'hard' },
+          { id: 'po-2', name: 'Информатика', complexity: 'medium' },
+          { id: 'po-3', name: 'Математика', complexity: 'hard' },
+          { id: 'po-4', name: 'Физика', complexity: 'hard' },
+          { id: 'po-5', name: 'Английский', complexity: 'medium' },
+        ],
+        settings: { ...DEFAULT_SETTINGS },
+        schedule: null,
+        lastUpdate: Date.now()
+      },
+      {
+        id: 'default-2',
+        name: 'ЖТ-22',
+        subjects: [
+          { id: 'zt-1', name: 'Правила ЖД движения', complexity: 'hard' },
+          { id: 'zt-2', name: 'Техника безопасности', complexity: 'hard' },
+          { id: 'zt-3', name: 'Устройство локомотива', complexity: 'hard' },
+          { id: 'zt-4', name: 'История ЖД', complexity: 'easy' },
+          { id: 'zt-5', name: 'Охрана труда', complexity: 'medium' },
+        ],
+        settings: { ...DEFAULT_SETTINGS },
+        schedule: null,
+        lastUpdate: Date.now()
+      }
+    ];
+  });
+  
+  const [activeGroupId, setActiveGroupId] = useState<string>(() => {
+    const saved = localStorage.getItem('edu_sync_active_id');
+    if (saved && groups.some(g => g.id === saved)) return saved;
+    return groups[0]?.id || 'default-1';
+  });
+
+  // Sync with localStorage
+  useEffect(() => {
+    localStorage.setItem('edu_sync_groups', JSON.stringify(groups));
+  }, [groups]);
+
+  useEffect(() => {
+    localStorage.setItem('edu_sync_active_id', activeGroupId);
+  }, [activeGroupId]);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [newSubjectName, setNewSubjectName] = useState('');
+  const [newSubjectComplexity, setNewSubjectComplexity] = useState<Subject['complexity']>('medium');
+  const [newGroupName, setNewGroupName] = useState('');
+  const [showAddGroup, setShowAddGroup] = useState(false);
+
+  const activeGroup = groups.find(g => g.id === activeGroupId) || groups[0];
+
+  // Initial generation for groups that don't have one
+  useEffect(() => {
+    const updatedGroups = groups.map(group => {
+      if (!group.schedule) {
+        return {
+          ...group,
+          schedule: generateSchedule({ ...group.settings, subjects: group.subjects })
+        };
+      }
+      return group;
+    });
+    setGroups(updatedGroups);
+  }, []);
+
+  // Helper to update active group state
+  const updateActiveGroup = (updates: Partial<Group>) => {
+    setGroups(groups.map(g => g.id === activeGroupId ? { ...g, ...updates, lastUpdate: Date.now() } : g));
+  };
+
+  const handleGenerate = () => {
+    setIsGenerating(true);
+    setTimeout(() => {
+      const result = generateSchedule({ ...activeGroup.settings, subjects: activeGroup.subjects });
+      updateActiveGroup({ schedule: result });
+      setIsGenerating(false);
+    }, 800);
+  };
+
+  const addSubject = () => {
+    if (!newSubjectName.trim()) return;
+    const newSub: Subject = {
+      id: Date.now().toString(),
+      name: newSubjectName.trim(),
+      complexity: newSubjectComplexity
+    };
+    updateActiveGroup({ subjects: [...activeGroup.subjects, newSub] });
+    setNewSubjectName('');
+  };
+
+  const removeSubject = (id: string) => {
+    updateActiveGroup({ subjects: activeGroup.subjects.filter(s => s.id !== id) });
+  };
+
+  const addGroup = () => {
+    if (!newGroupName.trim()) return;
+    const newGroup: Group = {
+      id: Date.now().toString(),
+      name: newGroupName.trim(),
+      subjects: [...DEFAULT_SUBJECTS],
+      settings: { ...DEFAULT_SETTINGS },
+      schedule: null,
+      lastUpdate: Date.now()
+    };
+    setGroups([...groups, newGroup]);
+    setActiveGroupId(newGroup.id);
+    setNewGroupName('');
+    setShowAddGroup(false);
+  };
+
+  const removeGroup = (id: string) => {
+    if (groups.length === 1) return;
+    const newGroups = groups.filter(g => g.id !== id);
+    setGroups(newGroups);
+    if (activeGroupId === id) {
+      setActiveGroupId(newGroups[0].id);
+    }
+  };
+
+  return (
+    <div className="flex h-screen bg-bg-base text-[#E0E0E0] font-sans selection:bg-accent selection:text-black overflow-hidden">
+      
+      {/* Telegram-style Sidebar */}
+      <aside className="w-80 border-r border-border-dim bg-[#0a0a0a] flex flex-col shrink-0">
+        <div className="p-6 border-b border-border-dim flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="bg-accent p-2 rounded-lg">
+              <BrainCircuit className="text-black w-5 h-5" />
+            </div>
+            <h1 className="text-lg font-serif italic text-accent tracking-tighter">ScheduleMate</h1>
+          </div>
+          <button 
+            onClick={() => setShowAddGroup(true)}
+            className="p-2 hover:bg-bg-active rounded-full transition-colors text-accent"
+          >
+            <Plus className="w-5 h-5" />
+          </button>
+        </div>
+
+        <div className="p-4">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted/40" />
+            <input 
+              type="text" 
+              placeholder="Search groups..." 
+              className="w-full bg-bg-card border border-border-dim rounded-lg py-2 pl-9 pr-4 text-xs focus:outline-none focus:border-accent transition-all"
+            />
+          </div>
+        </div>
+
+        <div className="flex-1 overflow-y-auto custom-scrollbar">
+          {showAddGroup && (
+            <div className="p-4 animate-in fade-in slide-in-from-top-2 duration-300">
+              <input 
+                autoFocus
+                type="text"
+                value={newGroupName}
+                onChange={(e) => setNewGroupName(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && addGroup()}
+                onBlur={() => !newGroupName && setShowAddGroup(false)}
+                placeholder="New group name..."
+                className="w-full bg-accent text-black font-bold text-xs p-3 rounded uppercase tracking-widest placeholder:text-black/50 outline-none"
+              />
+            </div>
+          )}
+
+          <div className="px-2 space-y-1 mt-2">
+            {groups.map(group => (
+              <button
+                key={group.id}
+                onClick={() => setActiveGroupId(group.id)}
+                className={`w-full group flex items-center justify-between p-3 rounded-xl transition-all ${
+                  activeGroupId === group.id 
+                    ? 'bg-accent text-black shadow-lg shadow-accent/10' 
+                    : 'text-muted hover:bg-bg-active hover:text-[#E0E0E0]'
+                }`}
+              >
+                <div className="flex items-center gap-3">
+                  <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold text-sm ${
+                    activeGroupId === group.id ? 'bg-black/10' : 'bg-bg-card border border-border-dim'
+                  }`}>
+                    {group.name.substring(0, 2).toUpperCase()}
+                  </div>
+                  <div className="text-left">
+                    <div className="text-xs font-bold uppercase tracking-widest leading-none mb-1">{group.name}</div>
+                    <div className={`text-[10px] font-medium opacity-50 ${activeGroupId === group.id ? 'text-black' : ''}`}>
+                      {group.subjects.length} subjects
+                    </div>
+                  </div>
+                </div>
+                {activeGroupId !== group.id && (
+                  <Trash2 
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      removeGroup(group.id);
+                    }}
+                    className="w-4 h-4 opacity-0 group-hover:opacity-100 hover:text-red-500 transition-all" 
+                  />
+                )}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="p-6 border-t border-border-dim text-[9px] font-bold uppercase tracking-[0.2em] text-muted/40">
+          Sync Status: Operational
+        </div>
+      </aside>
+
+      {/* Main Viewport */}
+      <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+        {/* Sub-header for active group */}
+        <header className="h-20 border-b border-border-dim flex items-center justify-between px-8 bg-bg-base/80 backdrop-blur-md sticky top-0 z-40">
+          <div className="flex items-center gap-6">
+            <div className="flex flex-col">
+              <h2 className="text-lg font-serif italic text-[#E0E0E0] lowercase tracking-tight">#{activeGroup.name.toLowerCase()}</h2>
+              <div className="flex items-center gap-2 mt-1">
+                <span className="w-1.5 h-1.5 bg-green-500 rounded-full"></span>
+                <span className="text-[9px] font-bold uppercase tracking-widest text-muted">Group Configuration Active</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-4">
+             <button 
+              onClick={handleGenerate}
+              disabled={isGenerating}
+              className="bg-accent text-black px-6 py-2.5 rounded-none text-[10px] font-bold uppercase tracking-[0.15em] hover:bg-white transition-all active:scale-95 flex items-center gap-2 disabled:opacity-50"
+            >
+              {isGenerating ? (
+                <div className="w-3 h-3 border border-black/30 border-t-black rounded-full animate-spin" />
+              ) : (
+                <Settings2 className="w-3 h-3" />
+              )}
+              {isGenerating ? 'Computing...' : 'Generate Matrix'}
+            </button>
+            <button className="p-2 hover:bg-bg-active rounded-full transition-colors text-muted">
+              <MoreVertical className="w-5 h-5" />
+            </button>
+          </div>
+        </header>
+
+        {/* Content Area - Scrollable */}
+        <div className="flex-1 overflow-y-auto custom-scrollbar bg-[#050505]">
+          <main className="max-w-7xl mx-auto px-8 py-12 grid grid-cols-1 lg:grid-cols-12 gap-16">
+            
+            {/* Control Column */}
+            <div className="lg:col-span-4 space-y-12">
+              <section className="animate-in fade-in slide-in-from-left-4 duration-500">
+                <div className="flex items-center gap-2 mb-8 border-l-2 border-accent pl-4">
+                  <h2 className="text-[10px] font-bold uppercase tracking-[0.3em] text-accent">Subject Registry</h2>
+                </div>
+                
+                <div className="space-y-4">
+                  <div className="flex flex-col gap-3">
+                    <input 
+                      type="text"
+                      value={newSubjectName}
+                      onChange={(e) => setNewSubjectName(e.target.value)}
+                      onKeyDown={(e) => e.key === 'Enter' && addSubject()}
+                      placeholder="Add system subject..."
+                      className="w-full bg-bg-card border border-border-dim px-4 py-4 text-xs font-medium text-[#E0E0E0] focus:outline-none focus:border-accent transition-all placeholder:text-muted/30 uppercase tracking-widest"
+                    />
+                    <div className="flex gap-3">
+                      <select 
+                        value={newSubjectComplexity}
+                        onChange={(e) => setNewSubjectComplexity(e.target.value as Subject['complexity'])}
+                        className="flex-1 bg-bg-card border border-border-dim px-4 py-3 text-[9px] font-bold uppercase tracking-widest text-muted focus:outline-none focus:border-accent appearance-none cursor-pointer"
+                      >
+                        <option value="easy">Level: Low</option>
+                        <option value="medium">Level: Standard</option>
+                        <option value="hard">Level: intensive</option>
+                      </select>
+                      <button 
+                        onClick={addSubject}
+                        className="bg-accent text-black px-6 py-3 hover:bg-white transition-all shrink-0 font-bold text-xs"
+                      >
+                        <Plus className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="bg-[#0c0c0c] border border-border-dim overflow-hidden divide-y divide-border-dim/50">
+                    {activeGroup.subjects.map((sub) => (
+                      <motion.div 
+                        layout
+                        key={sub.id} 
+                        className="px-5 py-4 flex items-center justify-between group hover:bg-bg-active transition-colors"
+                      >
+                        <div className="flex items-center gap-4">
+                          <div className={`w-1 h-3 ${
+                            sub.complexity === 'hard' ? 'bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.4)]' : 
+                            sub.complexity === 'medium' ? 'bg-orange-400 shadow-[0_0_8px_rgba(251,146,60,0.4)]' : 'bg-green-400 shadow-[0_0_8px_rgba(74,222,128,0.4)]'
+                          }`} />
+                          <span className="text-[11px] font-bold uppercase tracking-widest">{sub.name}</span>
+                        </div>
+                        <button 
+                          onClick={() => removeSubject(sub.id)}
+                          className="opacity-0 group-hover:opacity-100 p-1 text-muted hover:text-accent transition-all font-mono text-[9px] font-bold uppercase tracking-widest"
+                        >
+                          Delete
+                        </button>
+                      </motion.div>
+                    ))}
+                  </div>
+                </div>
+              </section>
+
+              <section className="animate-in fade-in slide-in-from-left-4 duration-500 delay-100">
+                <div className="flex items-center gap-2 mb-8 border-l-2 border-muted/50 pl-4">
+                  <h2 className="text-[10px] font-bold uppercase tracking-[0.3em] text-muted/60">System Parameters</h2>
+                </div>
+                
+                <div className="grid grid-cols-2 gap-8">
+                  <div className="space-y-8">
+                    <div>
+                      <label className="text-[9px] font-bold uppercase text-muted/40 tracking-[0.2em] mb-3 block">Sessions/Day</label>
+                      <input 
+                        type="number"
+                        value={activeGroup.settings.classesPerDay}
+                        onChange={(e) => updateActiveGroup({ settings: {...activeGroup.settings, classesPerDay: parseInt(e.target.value) || 1} })}
+                        className="w-full bg-bg-card border border-border-dim px-4 py-3 text-xs font-mono text-accent focus:outline-none focus:border-accent"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[9px] font-bold uppercase text-muted/40 tracking-[0.2em] mb-3 block">Sess. Length</label>
+                      <input 
+                        type="number"
+                        value={activeGroup.settings.classDuration}
+                        onChange={(e) => updateActiveGroup({ settings: {...activeGroup.settings, classDuration: parseInt(e.target.value) || 1} })}
+                        className="w-full bg-bg-card border border-border-dim px-4 py-3 text-xs font-mono text-accent focus:outline-none focus:border-accent"
+                      />
+                    </div>
+                  </div>
+                  <div className="space-y-8">
+                    <div>
+                      <label className="text-[9px] font-bold uppercase text-muted/40 tracking-[0.2em] mb-3 block">Deployment</label>
+                      <input 
+                        type="time"
+                        value={activeGroup.settings.startTime}
+                        onChange={(e) => updateActiveGroup({ settings: {...activeGroup.settings, startTime: e.target.value} })}
+                        className="w-full bg-bg-card border border-border-dim px-4 py-3 text-xs font-mono text-accent focus:outline-none focus:border-accent"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[9px] font-bold uppercase text-muted/40 tracking-[0.2em] mb-3 block">Recess (L)</label>
+                      <input 
+                        type="number"
+                        value={activeGroup.settings.longBreak}
+                        onChange={(e) => updateActiveGroup({ settings: {...activeGroup.settings, longBreak: parseInt(e.target.value) || 0} })}
+                        className="w-full bg-bg-card border border-border-dim px-4 py-3 text-xs font-mono text-accent focus:outline-none focus:border-accent"
+                      />
+                    </div>
+                  </div>
+                </div>
+              </section>
+            </div>
+
+            {/* Display Column */}
+            <div className="lg:col-span-8">
+              <AnimatePresence mode="wait">
+                {activeGroup.schedule ? (
+                  <motion.div 
+                    key={`${activeGroup.id}-schedule`}
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    className="space-y-20"
+                  >
+                    <section className="border-b border-border-dim pb-16">
+                      <div className="text-[9px] font-bold uppercase tracking-[0.5em] text-accent mb-8">Scheduling Matrix Log</div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-16">
+                        <div>
+                          <h3 className="text-3xl font-serif italic mb-6 leading-tight">Optimization Report</h3>
+                          <p className="text-xs text-muted leading-relaxed font-medium tracking-tight">
+                            Алгоритм успешно распределил предметы для группы <span className="text-[#E0E0E0]">{activeGroup.name}</span>. Система применила циклическую балансировку для минимизации когнитивного истощения.
+                          </p>
+                        </div>
+                        <div className="space-y-8 pr-4">
+                          <div className="flex gap-6 items-start">
+                            <span className="text-[10px] font-mono text-accent bg-accent/10 px-2 py-1">01</span>
+                            <p className="text-[10px] font-bold tracking-[0.1em] text-muted uppercase leading-relaxed">Variety ensured via pseudo-randomized pool injection.</p>
+                          </div>
+                          <div className="flex gap-6 items-start">
+                            <span className="text-[10px] font-mono text-accent bg-accent/10 px-2 py-1">02</span>
+                            <p className="text-[10px] font-bold tracking-[0.1em] text-muted uppercase leading-relaxed">Interval nodes placed at session indices (2, 4).</p>
+                          </div>
+                        </div>
+                      </div>
+                    </section>
+
+                    {activeGroup.schedule.map((day, dIdx) => (
+                      <section key={day.day} className="animate-in fade-in slide-in-from-bottom-6 duration-700" style={{ animationDelay: `${dIdx * 150}ms` }}>
+                        <div className="mb-10 flex items-center justify-between">
+                          <h2 className="text-sm font-serif italic uppercase tracking-[0.5em] text-accent font-normal">{day.day}</h2>
+                          <div className="h-px bg-border-dim flex-1 mx-8 opacity-30"></div>
+                          <span className="text-[9px] font-mono text-muted/30">DATE_REF: {dIdx + 1}/05</span>
+                        </div>
+
+                        <div className="space-y-3">
+                          {day.sessions.map((session) => {
+                            const isBreak = session.type !== 'class';
+                            return (
+                              <div 
+                                key={session.id}
+                                className={`group grid grid-cols-12 items-center gap-6 py-6 px-10 transition-all ${
+                                  isBreak 
+                                    ? 'bg-transparent border-y border-dashed border-border-dim/30 my-4 opacity-50' 
+                                    : 'bg-bg-card border-l-2 border-transparent hover:border-accent hover:bg-bg-active shadow-sm'
+                                }`}
+                              >
+                                <div className="col-span-3">
+                                  <div className="font-mono text-[11px] text-muted font-bold tracking-widest uppercase">
+                                    {session.startTime} — {session.endTime}
+                                  </div>
+                                </div>
+
+                                <div className="col-span-6">
+                                  {session.subject ? (
+                                    <div className="flex items-center gap-4">
+                                      <span className="text-xs font-bold tracking-[0.15em] uppercase text-[#E0E0E0]">{session.subject.name}</span>
+                                      <div className={`w-1 h-3 ${
+                                        session.subject.complexity === 'hard' ? 'bg-red-500' : 
+                                        session.subject.complexity === 'medium' ? 'bg-orange-400' : 'bg-green-400'
+                                      }`} />
+                                    </div>
+                                  ) : (
+                                    <div className="flex items-center gap-3">
+                                      <Hash className="w-3 h-3 text-accent" />
+                                      <span className="text-[10px] font-bold uppercase tracking-[0.3em] text-accent italic">
+                                        {session.type === 'long-break' ? 'Recess: Extended' : 'Recess: Standard'}
+                                      </span>
+                                    </div>
+                                  )}
+                                </div>
+
+                                <div className="col-span-3 text-right">
+                                  {!isBreak && (
+                                    <span className="text-[9px] font-mono text-muted/40 uppercase tracking-[0.2em] font-bold">
+                                      Session_{session.number}
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </section>
+                    ))}
+                  </motion.div>
+                ) : (
+                  <div className="h-[70vh] border border-dashed border-border-dim/50 flex flex-col items-center justify-center text-center px-16 space-y-8 bg-bg-card/30">
+                    <div className="relative">
+                      <div className="absolute inset-0 bg-accent/20 blur-3xl rounded-full"></div>
+                      <BrainCircuit className="w-16 h-16 text-accent relative z-10 opacity-20" />
+                    </div>
+                    <div className="space-y-4">
+                      <h3 className="text-3xl font-serif italic leading-none">Schedule Initialization Required</h3>
+                      <p className="text-muted text-[10px] font-bold uppercase tracking-[0.3em] max-w-sm mx-auto leading-relaxed">
+                        Data nodes identified for <span className="text-accent">#{activeGroup.name.toLowerCase()}</span>. Generate matrix to finalize spatial distribution.
+                      </p>
+                    </div>
+                    <button 
+                      onClick={handleGenerate}
+                      className="border border-accent text-accent px-8 py-3 text-[10px] font-bold uppercase tracking-widest hover:bg-accent hover:text-black transition-all"
+                    >
+                      Compute Optimal Matrix
+                    </button>
+                  </div>
+                )}
+              </AnimatePresence>
+            </div>
+          </main>
+
+          {/* Contextual Action Bar (Fixed Bottom) */}
+          <div className="fixed bottom-10 left-1/2 -translate-x-1/2 flex items-center gap-4 bg-bg-card/80 backdrop-blur-xl border border-border-dim px-6 py-4 rounded-full shadow-2xl z-50">
+             <button 
+              onClick={() => window.print()}
+              className="flex items-center gap-3 text-[10px] font-bold uppercase tracking-widest text-muted hover:text-accent transition-colors px-4 border-r border-border-dim"
+            >
+              <Printer className="w-4 h-4" />
+              <span>Print Core</span>
+            </button>
+            <div className="flex items-center gap-6 px-4">
+              <div className="flex items-center gap-2">
+                 <div className="w-1.5 h-1.5 rounded-full bg-green-500"></div>
+                 <span className="text-[9px] font-bold text-muted uppercase tracking-widest">Active: {activeGroup.name}</span>
+              </div>
+              <div className="text-[9px] font-bold text-muted uppercase tracking-widest opacity-50">
+                L: {activeGroup.subjects.length} Subjects
+              </div>
+            </div>
+            <button className="flex items-center gap-3 text-[10px] font-bold uppercase tracking-widest bg-accent text-black px-6 py-2 rounded-full hover:bg-white transition-all">
+              <Download className="w-4 h-4" />
+              <span>Export Metadata</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <style>{`
+        .custom-scrollbar::-webkit-scrollbar {
+          width: 4px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+          background: transparent;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+          background: #1f1f1f;
+          border-radius: 10px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+          background: #C5A059;
+        }
+        @media print {
+          aside { display: none !important; }
+          .fixed { display: none !important; }
+          header { display: none !important; }
+          main { margin: 0 !important; padding: 0 !important; width: 100% !important; }
+          .lg\\:col-span-4 { display: none !important; }
+          .lg\\:col-span-8 { width: 100% !important; grid-column: span 12 / span 12 !important; }
+          body { background: white !important; color: black !important; }
+          .bg-bg-card { background: white !important; border: 1px solid #ddd !important; }
+          .text-muted { color: #666 !important; }
+          .text-accent { color: black !important; border-color: #000 !important; }
+          .bg-bg-active { background: #f0f0f0 !important; }
+        }
+      `}</style>
+    </div>
+  );
+}
