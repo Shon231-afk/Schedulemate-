@@ -102,6 +102,7 @@ export default function App() {
   const [isExporting, setIsExporting] = useState(false);
   const [newSubjectName, setNewSubjectName] = useState('');
   const [newSubjectTeacher, setNewSubjectTeacher] = useState('');
+  const [newSubjectRoom, setNewSubjectRoom] = useState('');
   const [newSubjectHours, setNewSubjectHours] = useState<number>(36);
   const [newGroupName, setNewGroupName] = useState('');
   const [showAddGroup, setShowAddGroup] = useState(false);
@@ -183,9 +184,10 @@ export default function App() {
   useEffect(() => {
     const updatedGroups = groups.map(group => {
       if (!group.schedule) {
+        const otherGroups = groups.filter(g => g.id !== group.id);
         return {
           ...group,
-          schedule: generateSchedule({ ...group.settings, subjects: group.subjects }),
+          schedule: generateSchedule({ ...group.settings, subjects: group.subjects, otherGroups }),
           substitutions: group.substitutions || []
         };
       }
@@ -202,7 +204,8 @@ export default function App() {
   const handleGenerate = () => {
     setIsGenerating(true);
     setTimeout(() => {
-      const result = generateSchedule({ ...activeGroup.settings, subjects: activeGroup.subjects });
+      const otherGroups = groups.filter(g => g.id !== activeGroup.id);
+      const result = generateSchedule({ ...activeGroup.settings, subjects: activeGroup.subjects, otherGroups });
       updateActiveGroup({ schedule: result });
       setIsGenerating(false);
     }, 800);
@@ -214,11 +217,13 @@ export default function App() {
       id: Date.now().toString(),
       name: newSubjectName.trim(),
       teacherName: newSubjectTeacher.trim() || undefined,
+      room: newSubjectRoom.trim() || undefined,
       totalHours: newSubjectHours || undefined,
     };
     updateActiveGroup({ subjects: [...activeGroup.subjects, newSub] });
     setNewSubjectName('');
     setNewSubjectTeacher('');
+    setNewSubjectRoom('');
     setNewSubjectHours(36);
   };
 
@@ -414,6 +419,13 @@ export default function App() {
                       placeholder="Имя преподавателя (опционально)..."
                       className="w-full bg-bg-card border border-border-dim px-4 py-4 text-xs font-medium text-[#E0E0E0] focus:outline-none focus:border-accent transition-all placeholder:text-muted/30 uppercase tracking-widest"
                     />
+                    <input 
+                      type="text"
+                      value={newSubjectRoom}
+                      onChange={(e) => setNewSubjectRoom(e.target.value)}
+                      placeholder="Кабинет..."
+                      className="w-full bg-bg-card border border-border-dim px-4 py-4 text-xs font-medium text-[#E0E0E0] focus:outline-none focus:border-accent transition-all placeholder:text-muted/30 uppercase tracking-widest"
+                    />
                     <div className="flex gap-3">
                       <div className="flex-1 flex flex-col gap-1">
                         <label className="text-[8px] font-bold uppercase text-muted/40 tracking-widest">Всего часов</label>
@@ -426,7 +438,7 @@ export default function App() {
                       </div>
                       <button 
                         onClick={addSubject}
-                        className="bg-accent text-black px-6 py-3 hover:bg-white transition-all shrink-0 font-bold text-xs self-end h-[42px]"
+                        className="bg-accent text-black px-6 py-3 hover:bg-white transition-all shadow-lg active:scale-95 shrink-0 font-bold text-xs self-end h-[42px]"
                       >
                         <Plus className="w-4 h-4" />
                       </button>
@@ -451,11 +463,16 @@ export default function App() {
                             Удалить
                           </button>
                         </div>
-                        <div className="flex items-center gap-4 pl-5">
+                        <div className="flex items-center gap-4 pl-0">
                           <span className="text-[9px] text-muted font-medium uppercase tracking-tight">
                             {sub.teacherName || 'Нет имени'}
                           </span>
-                          <span className="text-[9px] text-accent font-mono">
+                          {sub.room && (
+                             <span className="text-[9px] text-accent/80 font-bold uppercase tracking-widest">
+                               Каб. {sub.room}
+                             </span>
+                          )}
+                          <span className="text-[9px] text-accent font-mono ml-auto">
                             {sub.totalHours || 0}Ч
                           </span>
                         </div>
@@ -643,9 +660,14 @@ export default function App() {
                                     <div className="flex items-center gap-4">
                                       <div className="flex flex-col">
                                         <span className="text-xs font-bold tracking-[0.15em] uppercase text-[#E0E0E0]">{session.subject.name}</span>
-                                        {session.subject.teacherName && (
-                                          <span className="text-[9px] text-muted font-medium uppercase tracking-tight mt-1">{session.subject.teacherName}</span>
-                                        )}
+                                        <div className="flex items-center gap-3 mt-1">
+                                          {session.subject.teacherName && (
+                                            <span className="text-[9px] text-muted font-medium uppercase tracking-tight">{session.subject.teacherName}</span>
+                                          )}
+                                          {session.subject.room && (
+                                            <span className="text-[9px] text-accent font-bold uppercase tracking-widest">Каб. {session.subject.room}</span>
+                                          )}
+                                        </div>
                                       </div>
                                     </div>
                                   ) : (

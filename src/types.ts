@@ -4,6 +4,7 @@ export interface Subject {
   id: string;
   name: string;
   teacherName?: string;
+  room?: string;
   totalHours?: number;
 }
 
