@@ -1,6 +1,6 @@
 {
   "name": "ScheduleMate",
-  "description": "An intelligent weekly schedule generator for schools and universities with automated subject distribution and break management.",
+  "description": "An intelligent weekly schedule generator with teacher tracking, hour-based prioritization, and multi-group management.",
   "requestFramePermissions": [],
   "majorCapabilities": []
 }

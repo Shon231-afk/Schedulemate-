@@ -12,6 +12,11 @@
   --color-accent: #C5A059;
   --color-muted: #808080;
   --color-border-dim: #1F1F1F;
+  
+  /* Fallbacks for html2canvas */
+  --color-red-500: #ef4444;
+  --color-orange-400: #fb923c;
+  --color-green-400: #4ade80;
 }
 
 @layer base {

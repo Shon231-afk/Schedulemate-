@@ -20,15 +20,16 @@ import {
 } from 'lucide-react';
 import { DayOfWeek, Subject, ScheduleSettings, DaySchedule, Group } from './types';
 import { generateSchedule } from './logic/scheduler';
+import { exportScheduleToPDF } from './logic/pdfExport';
 
 const DAYS: DayOfWeek[] = ['Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница'];
 
 const DEFAULT_SUBJECTS: Subject[] = [
-  { id: '1', name: 'Математика', complexity: 'hard' },
-  { id: '2', name: 'Физика', complexity: 'hard' },
-  { id: '3', name: 'Программирование', complexity: 'medium' },
-  { id: '4', name: 'Английский', complexity: 'medium' },
-  { id: '5', name: 'История', complexity: 'easy' },
+  { id: '1', name: 'Математика', teacherName: 'Лобачевский Н.И.', totalHours: 72 },
+  { id: '2', name: 'Физика', teacherName: 'Ландау Л.Д.', totalHours: 54 },
+  { id: '3', name: 'Программирование', teacherName: 'Касперский Е.В.', totalHours: 108 },
+  { id: '4', name: 'Английский', teacherName: 'Булгаков М.А.', totalHours: 36 },
+  { id: '5', name: 'История', teacherName: 'Ключевский В.О.', totalHours: 36 },
 ];
 
 const DEFAULT_SETTINGS: ScheduleSettings = {
@@ -47,7 +48,12 @@ export default function App() {
     const saved = localStorage.getItem('edu_sync_groups');
     if (saved) {
       try {
-        return JSON.parse(saved);
+        const parsed = JSON.parse(saved);
+        // Migration: Ensure substitutions exist
+        return parsed.map((g: any) => ({
+          ...g,
+          substitutions: g.substitutions || []
+        }));
       } catch (e) {
         console.error('Failed to parse saved groups', e);
       }
@@ -57,28 +63,30 @@ export default function App() {
         id: 'default-1',
         name: 'ПО-31',
         subjects: [
-          { id: 'po-1', name: 'Программирование', complexity: 'hard' },
-          { id: 'po-2', name: 'Информатика', complexity: 'medium' },
-          { id: 'po-3', name: 'Математика', complexity: 'hard' },
-          { id: 'po-4', name: 'Физика', complexity: 'hard' },
-          { id: 'po-5', name: 'Английский', complexity: 'medium' },
+          { id: 'po-1', name: 'Программирование', teacherName: 'Иванов И.И.', totalHours: 108 },
+          { id: 'po-2', name: 'Информатика', teacherName: 'Петров П.П.', totalHours: 72 },
+          { id: 'po-3', name: 'Математика', teacherName: 'Сидоров С.С.', totalHours: 72 },
+          { id: 'po-4', name: 'Физика', teacherName: 'Иванов И.И.', totalHours: 54 },
+          { id: 'po-5', name: 'Английский', teacherName: 'Смирнова А.А.', totalHours: 36 },
         ],
         settings: { ...DEFAULT_SETTINGS },
         schedule: null,
+        substitutions: [],
         lastUpdate: Date.now()
       },
       {
         id: 'default-2',
         name: 'ЖТ-22',
         subjects: [
-          { id: 'zt-1', name: 'Правила ЖД движения', complexity: 'hard' },
-          { id: 'zt-2', name: 'Техника безопасности', complexity: 'hard' },
-          { id: 'zt-3', name: 'Устройство локомотива', complexity: 'hard' },
-          { id: 'zt-4', name: 'История ЖД', complexity: 'easy' },
-          { id: 'zt-5', name: 'Охрана труда', complexity: 'medium' },
+          { id: 'zt-1', name: 'Правила ЖД движения', teacherName: 'Васильев В.В.', totalHours: 90 },
+          { id: 'zt-2', name: 'Техника безопасности', teacherName: 'Васильев В.В.', totalHours: 36 },
+          { id: 'zt-3', name: 'Устройство локомотива', teacherName: 'Карпов К.К.', totalHours: 72 },
+          { id: 'zt-4', name: 'История ЖД', teacherName: 'Морозов М.М.', totalHours: 18 },
+          { id: 'zt-5', name: 'Охрана труда', teacherName: 'Карпов К.К.', totalHours: 36 },
         ],
         settings: { ...DEFAULT_SETTINGS },
         schedule: null,
+        substitutions: [],
         lastUpdate: Date.now()
       }
     ];
@@ -90,6 +98,18 @@ export default function App() {
     return groups[0]?.id || 'default-1';
   });
 
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
+  const [newSubjectName, setNewSubjectName] = useState('');
+  const [newSubjectTeacher, setNewSubjectTeacher] = useState('');
+  const [newSubjectHours, setNewSubjectHours] = useState<number>(36);
+  const [newGroupName, setNewGroupName] = useState('');
+  const [showAddGroup, setShowAddGroup] = useState(false);
+
+  // Substitution state
+  const [sickTeacher, setSickTeacher] = useState('');
+  const [replacementSubId, setReplacementSubId] = useState('');
+
   // Sync with localStorage
   useEffect(() => {
     localStorage.setItem('edu_sync_groups', JSON.stringify(groups));
@@ -98,13 +118,66 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem('edu_sync_active_id', activeGroupId);
   }, [activeGroupId]);
-  const [isGenerating, setIsGenerating] = useState(false);
-  const [newSubjectName, setNewSubjectName] = useState('');
-  const [newSubjectComplexity, setNewSubjectComplexity] = useState<Subject['complexity']>('medium');
-  const [newGroupName, setNewGroupName] = useState('');
-  const [showAddGroup, setShowAddGroup] = useState(false);
+
+  const handleExportPDF = async () => {
+    if (!activeGroup.schedule || isExporting) return;
+    setIsExporting(true);
+    try {
+      await exportScheduleToPDF(activeGroup);
+    } catch (error) {
+      console.error(error);
+    } finally {
+      setIsExporting(false);
+    }
+  };
 
   const activeGroup = groups.find(g => g.id === activeGroupId) || groups[0];
+
+  const applySubstitution = () => {
+    if (!sickTeacher || !replacementSubId || !activeGroup.schedule) return;
+
+    let replacementSubject: Subject | undefined;
+    if (replacementSubId !== 'cancelled') {
+      replacementSubject = activeGroup.subjects.find(s => s.id === replacementSubId);
+    }
+    
+    const newSchedule = activeGroup.schedule.map(day => ({
+      ...day,
+      sessions: day.sessions.map(session => {
+        if (session.subject && session.subject.teacherName === sickTeacher) {
+          if (replacementSubId === 'cancelled') {
+            return {
+              ...session,
+              subject: undefined,
+              type: 'short-break'
+            };
+          } else if (replacementSubject) {
+            return {
+              ...session,
+              subject: { ...replacementSubject }
+            };
+          }
+        }
+        return session;
+      })
+    }));
+
+    updateActiveGroup({ 
+      schedule: newSchedule,
+      substitutions: [
+        ...(activeGroup.substitutions || []),
+        { 
+          id: Date.now().toString(), 
+          sickTeacherName: sickTeacher, 
+          replacementSubjectId: replacementSubId, 
+          dateApplied: Date.now() 
+        }
+      ]
+    });
+    
+    setSickTeacher('');
+    setReplacementSubId('');
+  };
 
   // Initial generation for groups that don't have one
   useEffect(() => {
@@ -112,7 +185,8 @@ export default function App() {
       if (!group.schedule) {
         return {
           ...group,
-          schedule: generateSchedule({ ...group.settings, subjects: group.subjects })
+          schedule: generateSchedule({ ...group.settings, subjects: group.subjects }),
+          substitutions: group.substitutions || []
         };
       }
       return group;
@@ -139,10 +213,13 @@ export default function App() {
     const newSub: Subject = {
       id: Date.now().toString(),
       name: newSubjectName.trim(),
-      complexity: newSubjectComplexity
+      teacherName: newSubjectTeacher.trim() || undefined,
+      totalHours: newSubjectHours || undefined,
     };
     updateActiveGroup({ subjects: [...activeGroup.subjects, newSub] });
     setNewSubjectName('');
+    setNewSubjectTeacher('');
+    setNewSubjectHours(36);
   };
 
   const removeSubject = (id: string) => {
@@ -157,6 +234,7 @@ export default function App() {
       subjects: [...DEFAULT_SUBJECTS],
       settings: { ...DEFAULT_SETTINGS },
       schedule: null,
+      substitutions: [],
       lastUpdate: Date.now()
     };
     setGroups([...groups, newGroup]);
@@ -199,7 +277,7 @@ export default function App() {
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted/40" />
             <input 
               type="text" 
-              placeholder="Search groups..." 
+              placeholder="Поиск групп..." 
               className="w-full bg-bg-card border border-border-dim rounded-lg py-2 pl-9 pr-4 text-xs focus:outline-none focus:border-accent transition-all"
             />
           </div>
@@ -214,8 +292,14 @@ export default function App() {
                 value={newGroupName}
                 onChange={(e) => setNewGroupName(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && addGroup()}
-                onBlur={() => !newGroupName && setShowAddGroup(false)}
-                placeholder="New group name..."
+                onBlur={() => {
+                  if (newGroupName.trim()) {
+                    addGroup();
+                  } else {
+                    setShowAddGroup(false);
+                  }
+                }}
+                placeholder="Название новой группы..."
                 className="w-full bg-accent text-black font-bold text-xs p-3 rounded uppercase tracking-widest placeholder:text-black/50 outline-none"
               />
             </div>
@@ -241,7 +325,7 @@ export default function App() {
                   <div className="text-left">
                     <div className="text-xs font-bold uppercase tracking-widest leading-none mb-1">{group.name}</div>
                     <div className={`text-[10px] font-medium opacity-50 ${activeGroupId === group.id ? 'text-black' : ''}`}>
-                      {group.subjects.length} subjects
+                      {group.subjects.length} предметов
                     </div>
                   </div>
                 </div>
@@ -259,8 +343,13 @@ export default function App() {
           </div>
         </div>
 
-        <div className="p-6 border-t border-border-dim text-[9px] font-bold uppercase tracking-[0.2em] text-muted/40">
-          Sync Status: Operational
+        <div className="flex-1 overflow-y-auto custom-scrollbar">
+          <div className="p-6 border-t border-border-dim text-[9px] font-bold uppercase tracking-[0.2em] text-muted/40">
+            Статус: Работает
+          </div>
+          <div className="p-6 border-t border-border-dim text-[9px] font-bold uppercase tracking-[0.2em] text-accent/60">
+            © 2024 ScheduleMate AI
+          </div>
         </div>
       </aside>
 
@@ -273,7 +362,7 @@ export default function App() {
               <h2 className="text-lg font-serif italic text-[#E0E0E0] lowercase tracking-tight">#{activeGroup.name.toLowerCase()}</h2>
               <div className="flex items-center gap-2 mt-1">
                 <span className="w-1.5 h-1.5 bg-green-500 rounded-full"></span>
-                <span className="text-[9px] font-bold uppercase tracking-widest text-muted">Group Configuration Active</span>
+                <span className="text-[9px] font-bold uppercase tracking-widest text-muted">Конфигурация группы активна</span>
               </div>
             </div>
           </div>
@@ -289,7 +378,7 @@ export default function App() {
               ) : (
                 <Settings2 className="w-3 h-3" />
               )}
-              {isGenerating ? 'Computing...' : 'Generate Matrix'}
+              {isGenerating ? 'ВЫЧИСЛЕНИЕ...' : 'СГЕНЕРИРОВАТЬ СЕТКУ'}
             </button>
             <button className="p-2 hover:bg-bg-active rounded-full transition-colors text-muted">
               <MoreVertical className="w-5 h-5" />
@@ -305,7 +394,7 @@ export default function App() {
             <div className="lg:col-span-4 space-y-12">
               <section className="animate-in fade-in slide-in-from-left-4 duration-500">
                 <div className="flex items-center gap-2 mb-8 border-l-2 border-accent pl-4">
-                  <h2 className="text-[10px] font-bold uppercase tracking-[0.3em] text-accent">Subject Registry</h2>
+                  <h2 className="text-[10px] font-bold uppercase tracking-[0.3em] text-accent">Реестр предметов</h2>
                 </div>
                 
                 <div className="space-y-4">
@@ -315,22 +404,29 @@ export default function App() {
                       value={newSubjectName}
                       onChange={(e) => setNewSubjectName(e.target.value)}
                       onKeyDown={(e) => e.key === 'Enter' && addSubject()}
-                      placeholder="Add system subject..."
+                      placeholder="Название предмета..."
+                      className="w-full bg-bg-card border border-border-dim px-4 py-4 text-xs font-medium text-[#E0E0E0] focus:outline-none focus:border-accent transition-all placeholder:text-muted/30 uppercase tracking-widest"
+                    />
+                    <input 
+                      type="text"
+                      value={newSubjectTeacher}
+                      onChange={(e) => setNewSubjectTeacher(e.target.value)}
+                      placeholder="Имя преподавателя (опционально)..."
                       className="w-full bg-bg-card border border-border-dim px-4 py-4 text-xs font-medium text-[#E0E0E0] focus:outline-none focus:border-accent transition-all placeholder:text-muted/30 uppercase tracking-widest"
                     />
                     <div className="flex gap-3">
-                      <select 
-                        value={newSubjectComplexity}
-                        onChange={(e) => setNewSubjectComplexity(e.target.value as Subject['complexity'])}
-                        className="flex-1 bg-bg-card border border-border-dim px-4 py-3 text-[9px] font-bold uppercase tracking-widest text-muted focus:outline-none focus:border-accent appearance-none cursor-pointer"
-                      >
-                        <option value="easy">Level: Low</option>
-                        <option value="medium">Level: Standard</option>
-                        <option value="hard">Level: intensive</option>
-                      </select>
+                      <div className="flex-1 flex flex-col gap-1">
+                        <label className="text-[8px] font-bold uppercase text-muted/40 tracking-widest">Всего часов</label>
+                        <input 
+                          type="number"
+                          value={newSubjectHours}
+                          onChange={(e) => setNewSubjectHours(parseInt(e.target.value) || 0)}
+                          className="w-full bg-bg-card border border-border-dim px-4 py-3 text-[10px] font-mono text-accent focus:outline-none focus:border-accent"
+                        />
+                      </div>
                       <button 
                         onClick={addSubject}
-                        className="bg-accent text-black px-6 py-3 hover:bg-white transition-all shrink-0 font-bold text-xs"
+                        className="bg-accent text-black px-6 py-3 hover:bg-white transition-all shrink-0 font-bold text-xs self-end h-[42px]"
                       >
                         <Plus className="w-4 h-4" />
                       </button>
@@ -342,21 +438,27 @@ export default function App() {
                       <motion.div 
                         layout
                         key={sub.id} 
-                        className="px-5 py-4 flex items-center justify-between group hover:bg-bg-active transition-colors"
+                        className="px-5 py-4 flex flex-col gap-1 group hover:bg-bg-active transition-colors"
                       >
-                        <div className="flex items-center gap-4">
-                          <div className={`w-1 h-3 ${
-                            sub.complexity === 'hard' ? 'bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.4)]' : 
-                            sub.complexity === 'medium' ? 'bg-orange-400 shadow-[0_0_8px_rgba(251,146,60,0.4)]' : 'bg-green-400 shadow-[0_0_8px_rgba(74,222,128,0.4)]'
-                          }`} />
-                          <span className="text-[11px] font-bold uppercase tracking-widest">{sub.name}</span>
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-4">
+                            <span className="text-[11px] font-bold uppercase tracking-widest">{sub.name}</span>
+                          </div>
+                          <button 
+                            onClick={() => removeSubject(sub.id)}
+                            className="opacity-0 group-hover:opacity-100 p-1 text-muted hover:text-accent transition-all font-mono text-[9px] font-bold uppercase tracking-widest"
+                          >
+                            Удалить
+                          </button>
                         </div>
-                        <button 
-                          onClick={() => removeSubject(sub.id)}
-                          className="opacity-0 group-hover:opacity-100 p-1 text-muted hover:text-accent transition-all font-mono text-[9px] font-bold uppercase tracking-widest"
-                        >
-                          Delete
-                        </button>
+                        <div className="flex items-center gap-4 pl-5">
+                          <span className="text-[9px] text-muted font-medium uppercase tracking-tight">
+                            {sub.teacherName || 'Нет имени'}
+                          </span>
+                          <span className="text-[9px] text-accent font-mono">
+                            {sub.totalHours || 0}Ч
+                          </span>
+                        </div>
                       </motion.div>
                     ))}
                   </div>
@@ -365,13 +467,13 @@ export default function App() {
 
               <section className="animate-in fade-in slide-in-from-left-4 duration-500 delay-100">
                 <div className="flex items-center gap-2 mb-8 border-l-2 border-muted/50 pl-4">
-                  <h2 className="text-[10px] font-bold uppercase tracking-[0.3em] text-muted/60">System Parameters</h2>
+                  <h2 className="text-[10px] font-bold uppercase tracking-[0.3em] text-muted/60">Системные параметры</h2>
                 </div>
                 
                 <div className="grid grid-cols-2 gap-8">
                   <div className="space-y-8">
                     <div>
-                      <label className="text-[9px] font-bold uppercase text-muted/40 tracking-[0.2em] mb-3 block">Sessions/Day</label>
+                      <label className="text-[9px] font-bold uppercase text-muted/40 tracking-[0.2em] mb-3 block">Пар в день</label>
                       <input 
                         type="number"
                         value={activeGroup.settings.classesPerDay}
@@ -380,7 +482,7 @@ export default function App() {
                       />
                     </div>
                     <div>
-                      <label className="text-[9px] font-bold uppercase text-muted/40 tracking-[0.2em] mb-3 block">Sess. Length</label>
+                      <label className="text-[9px] font-bold uppercase text-muted/40 tracking-[0.2em] mb-3 block">Длительность пары</label>
                       <input 
                         type="number"
                         value={activeGroup.settings.classDuration}
@@ -391,7 +493,7 @@ export default function App() {
                   </div>
                   <div className="space-y-8">
                     <div>
-                      <label className="text-[9px] font-bold uppercase text-muted/40 tracking-[0.2em] mb-3 block">Deployment</label>
+                      <label className="text-[9px] font-bold uppercase text-muted/40 tracking-[0.2em] mb-3 block">Начало</label>
                       <input 
                         type="time"
                         value={activeGroup.settings.startTime}
@@ -400,7 +502,7 @@ export default function App() {
                       />
                     </div>
                     <div>
-                      <label className="text-[9px] font-bold uppercase text-muted/40 tracking-[0.2em] mb-3 block">Recess (L)</label>
+                      <label className="text-[9px] font-bold uppercase text-muted/40 tracking-[0.2em] mb-3 block">Большая перемена</label>
                       <input 
                         type="number"
                         value={activeGroup.settings.longBreak}
@@ -411,6 +513,69 @@ export default function App() {
                   </div>
                 </div>
               </section>
+
+              {/* Substitution Section */}
+              <section className="animate-in fade-in slide-in-from-left-4 duration-500 delay-200">
+                <div className="flex items-center gap-2 mb-8 border-l-2 border-red-500 pl-4">
+                  <h2 className="text-[10px] font-bold uppercase tracking-[0.3em] text-red-500">Замена преподавателя</h2>
+                </div>
+                
+                <div className="space-y-6">
+                  <div>
+                    <label className="text-[9px] font-bold uppercase text-muted/40 tracking-[0.2em] mb-3 block">Заболевший учитель</label>
+                    <select 
+                      value={sickTeacher}
+                      onChange={(e) => setSickTeacher(e.target.value)}
+                      className="w-full bg-bg-card border border-border-dim px-4 py-3 text-[10px] font-bold uppercase tracking-widest text-muted focus:outline-none focus:border-accent appearance-none cursor-pointer"
+                    >
+                      <option value="">Выберите учителя...</option>
+                      {Array.from(new Set(activeGroup.subjects.map(s => s.teacherName).filter(Boolean))).map(teacher => (
+                        <option key={teacher as string} value={teacher as string}>{teacher}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="text-[9px] font-bold uppercase text-muted/40 tracking-[0.2em] mb-3 block">Замена</label>
+                    <select 
+                      value={replacementSubId}
+                      onChange={(e) => setReplacementSubId(e.target.value)}
+                      className="w-full bg-bg-card border border-border-dim px-4 py-3 text-[10px] font-bold uppercase tracking-widest text-muted focus:outline-none focus:border-accent appearance-none cursor-pointer"
+                    >
+                      <option value="">Выберите действие...</option>
+                      <option value="cancelled" className="text-red-500 font-bold italic">ОТМЕНИТЬ ВСЕ ЗАНЯТИЯ</option>
+                      {activeGroup.subjects.map(sub => (
+                        <option key={sub.id} value={sub.id}>{sub.name} ({sub.teacherName || 'Без имени'})</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <button 
+                    onClick={applySubstitution}
+                    disabled={!sickTeacher || !replacementSubId}
+                    className="w-full bg-red-500/10 border border-red-500 text-red-500 px-6 py-3 rounded-none text-[10px] font-bold uppercase tracking-[0.15em] hover:bg-red-500 hover:text-white transition-all active:scale-95 disabled:opacity-30 flex items-center justify-center gap-2"
+                  >
+                    <Users className="w-4 h-4" />
+                    Применить замену
+                  </button>
+
+                  {/* List of active substitutions */}
+                  {activeGroup.substitutions?.length > 0 && (
+                    <div className="mt-8 space-y-3">
+                      <h3 className="text-[8px] font-bold uppercase tracking-[0.2em] text-muted/40">Активные протоколы</h3>
+                      {activeGroup.substitutions.map(sub => (
+                        <div key={sub.id} className="flex items-center justify-between bg-red-500/5 border border-red-500/20 p-3 rounded text-[9px] font-bold uppercase tracking-widest">
+                          <span className="text-red-500">{sub.sickTeacherName}</span>
+                          <span className="text-muted">➔</span>
+                          <span className="text-accent truncate ml-2">
+                            {sub.replacementSubjectId === 'cancelled' ? 'ОТМЕНЕНО' : activeGroup.subjects.find(s => s.id === sub.replacementSubjectId)?.name}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </section>
             </div>
 
             {/* Display Column */}
@@ -419,28 +584,29 @@ export default function App() {
                 {activeGroup.schedule ? (
                   <motion.div 
                     key={`${activeGroup.id}-schedule`}
+                    id="schedule-to-export"
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
                     exit={{ opacity: 0 }}
-                    className="space-y-20"
+                    className="space-y-20 p-8 pt-4"
                   >
                     <section className="border-b border-border-dim pb-16">
-                      <div className="text-[9px] font-bold uppercase tracking-[0.5em] text-accent mb-8">Scheduling Matrix Log</div>
+                      <div className="text-[9px] font-bold uppercase tracking-[0.5em] text-accent mb-8">Журнал расписания</div>
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-16">
                         <div>
-                          <h3 className="text-3xl font-serif italic mb-6 leading-tight">Optimization Report</h3>
+                          <h3 className="text-3xl font-serif italic mb-6 leading-tight">Отчет по оптимизации</h3>
                           <p className="text-xs text-muted leading-relaxed font-medium tracking-tight">
-                            Алгоритм успешно распределил предметы для группы <span className="text-[#E0E0E0]">{activeGroup.name}</span>. Система применила циклическую балансировку для минимизации когнитивного истощения.
+                            Алгоритм успешно распределил предметы для группы <span className="text-[#E0E0E0]">{activeGroup.name}</span>. Система применила циклическую балансировку для минимизации когнитивной нагрузки.
                           </p>
                         </div>
                         <div className="space-y-8 pr-4">
                           <div className="flex gap-6 items-start">
                             <span className="text-[10px] font-mono text-accent bg-accent/10 px-2 py-1">01</span>
-                            <p className="text-[10px] font-bold tracking-[0.1em] text-muted uppercase leading-relaxed">Variety ensured via pseudo-randomized pool injection.</p>
+                            <p className="text-[10px] font-bold tracking-[0.1em] text-muted uppercase leading-relaxed">Разнообразие обеспечено через инъекцию псевдорандомизированного пула.</p>
                           </div>
                           <div className="flex gap-6 items-start">
                             <span className="text-[10px] font-mono text-accent bg-accent/10 px-2 py-1">02</span>
-                            <p className="text-[10px] font-bold tracking-[0.1em] text-muted uppercase leading-relaxed">Interval nodes placed at session indices (2, 4).</p>
+                            <p className="text-[10px] font-bold tracking-[0.1em] text-muted uppercase leading-relaxed">Интервальные узлы размещены на индексах сессий (2, 4).</p>
                           </div>
                         </div>
                       </div>
@@ -475,17 +641,18 @@ export default function App() {
                                 <div className="col-span-6">
                                   {session.subject ? (
                                     <div className="flex items-center gap-4">
-                                      <span className="text-xs font-bold tracking-[0.15em] uppercase text-[#E0E0E0]">{session.subject.name}</span>
-                                      <div className={`w-1 h-3 ${
-                                        session.subject.complexity === 'hard' ? 'bg-red-500' : 
-                                        session.subject.complexity === 'medium' ? 'bg-orange-400' : 'bg-green-400'
-                                      }`} />
+                                      <div className="flex flex-col">
+                                        <span className="text-xs font-bold tracking-[0.15em] uppercase text-[#E0E0E0]">{session.subject.name}</span>
+                                        {session.subject.teacherName && (
+                                          <span className="text-[9px] text-muted font-medium uppercase tracking-tight mt-1">{session.subject.teacherName}</span>
+                                        )}
+                                      </div>
                                     </div>
                                   ) : (
                                     <div className="flex items-center gap-3">
                                       <Hash className="w-3 h-3 text-accent" />
                                       <span className="text-[10px] font-bold uppercase tracking-[0.3em] text-accent italic">
-                                        {session.type === 'long-break' ? 'Recess: Extended' : 'Recess: Standard'}
+                                        {session.type === 'long-break' ? 'Большая перемена' : 'Обычная перемена'}
                                       </span>
                                     </div>
                                   )}
@@ -494,7 +661,7 @@ export default function App() {
                                 <div className="col-span-3 text-right">
                                   {!isBreak && (
                                     <span className="text-[9px] font-mono text-muted/40 uppercase tracking-[0.2em] font-bold">
-                                      Session_{session.number}
+                                      Пара_{session.number}
                                     </span>
                                   )}
                                 </div>
@@ -512,16 +679,16 @@ export default function App() {
                       <BrainCircuit className="w-16 h-16 text-accent relative z-10 opacity-20" />
                     </div>
                     <div className="space-y-4">
-                      <h3 className="text-3xl font-serif italic leading-none">Schedule Initialization Required</h3>
+                      <h3 className="text-3xl font-serif italic leading-none">Требуется генерация расписания</h3>
                       <p className="text-muted text-[10px] font-bold uppercase tracking-[0.3em] max-w-sm mx-auto leading-relaxed">
-                        Data nodes identified for <span className="text-accent">#{activeGroup.name.toLowerCase()}</span>. Generate matrix to finalize spatial distribution.
+                        Данные для группы <span className="text-accent">#{activeGroup.name.toLowerCase()}</span> идентифицированы. Сгенерируйте сетку для финализации распределения.
                       </p>
                     </div>
                     <button 
                       onClick={handleGenerate}
                       className="border border-accent text-accent px-8 py-3 text-[10px] font-bold uppercase tracking-widest hover:bg-accent hover:text-black transition-all"
                     >
-                      Compute Optimal Matrix
+                      Рассчитать оптимальную сетку
                     </button>
                   </div>
                 )}
@@ -536,20 +703,28 @@ export default function App() {
               className="flex items-center gap-3 text-[10px] font-bold uppercase tracking-widest text-muted hover:text-accent transition-colors px-4 border-r border-border-dim"
             >
               <Printer className="w-4 h-4" />
-              <span>Print Core</span>
+              <span>Печать</span>
             </button>
             <div className="flex items-center gap-6 px-4">
               <div className="flex items-center gap-2">
                  <div className="w-1.5 h-1.5 rounded-full bg-green-500"></div>
-                 <span className="text-[9px] font-bold text-muted uppercase tracking-widest">Active: {activeGroup.name}</span>
+                 <span className="text-[9px] font-bold text-muted uppercase tracking-widest">Активно: {activeGroup.name}</span>
               </div>
               <div className="text-[9px] font-bold text-muted uppercase tracking-widest opacity-50">
-                L: {activeGroup.subjects.length} Subjects
+                {activeGroup.subjects.length} Предметов
               </div>
             </div>
-            <button className="flex items-center gap-3 text-[10px] font-bold uppercase tracking-widest bg-accent text-black px-6 py-2 rounded-full hover:bg-white transition-all">
-              <Download className="w-4 h-4" />
-              <span>Export Metadata</span>
+            <button 
+              onClick={handleExportPDF}
+              disabled={isExporting || !activeGroup.schedule}
+              className="flex items-center gap-3 text-[10px] font-bold uppercase tracking-widest bg-accent text-black px-6 py-2 rounded-full hover:bg-white transition-all disabled:opacity-50"
+            >
+              {isExporting ? (
+                <div className="w-4 h-4 border-2 border-black/30 border-t-black rounded-full animate-spin" />
+              ) : (
+                <Download className="w-4 h-4" />
+              )}
+              <span>{isExporting ? 'Создание...' : 'Скачать PDF'}</span>
             </button>
           </div>
         </div>

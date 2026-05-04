@@ -13,16 +13,39 @@ export function generateSchedule(settings: ScheduleSettings): DaySchedule[] {
   } = settings;
 
   // Flatten available subjects into a pool to distribute
-  // We want to use each subject at least once if possible, and then repeat
+  // We want to use each subject proportionally to its totalHours if specified
   const totalSlots = days.length * classesPerDay;
   let subjectPool: Subject[] = [];
   
-  // Fill pool proportionally
-  while (subjectPool.length < totalSlots) {
-    const shuffled = [...subjects].sort(() => Math.random() - 0.5);
-    subjectPool = [...subjectPool, ...shuffled];
+  // Calculate total hours across all subjects to use as weights
+  const totalHoursSum = subjects.reduce((sum, s) => sum + (s.totalHours || 1), 0);
+  
+  if (totalHoursSum > 0) {
+    // Proportional distribution based on hours
+    subjects.forEach(subject => {
+      const weight = subject.totalHours || 1;
+      const count = Math.max(1, Math.round((weight / totalHoursSum) * totalSlots));
+      for (let i = 0; i < count; i++) {
+        subjectPool.push(subject);
+      }
+    });
+
+    // Shuffle and trim/pad pool to exact size
+    subjectPool = subjectPool.sort(() => Math.random() - 0.5);
+    
+    while (subjectPool.length < totalSlots) {
+      const randomSub = subjects[Math.floor(Math.random() * subjects.length)];
+      subjectPool.push(randomSub);
+    }
+    subjectPool = subjectPool.slice(0, totalSlots);
+  } else {
+    // Fallback if no subjects
+    while (subjectPool.length < totalSlots) {
+      const shuffled = [...subjects].sort(() => Math.random() - 0.5);
+      subjectPool = [...subjectPool, ...shuffled];
+    }
+    subjectPool = subjectPool.slice(0, totalSlots);
   }
-  subjectPool = subjectPool.slice(0, totalSlots);
 
   // Smart distribution: avoid same subject twice in a row in a day if possible
   const schedule: DaySchedule[] = [];
